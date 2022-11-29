@@ -63,9 +63,12 @@ function rank($contents)
 function save_product($product)
 {
     // Найдем товар
-    $S = SQLQ("SELECT * FROM `product` WHERE `sku` LIKE '{$product['sku']}' ");
+    $S = SQLQ("SELECT * FROM `product` WHERE `sku` LIKE '{$product['sku']}' OR  `product_id` = '{$product['product_id']}' ");
     if(!mysqli_num_rows($S)){
-        SQLQ("INSERT INTO `product` (`sku`, `weight`, `product_id`, `img`) VALUES ('{$product['sku']}', '{$product['weight']}', '{$product['meta']['og:product_id']}', '{$product['img']}');");
+        SQLQ("INSERT INTO `product` (`sku`, `weight`, `product_id`, `img``url`) VALUES ('{$product['sku']}', '{$product['weight']}', '{$product['meta']['og:product_id']}', '{$product['img']}');");
+    }else{
+        while ($Q = mysqli_fetch_array($S)) {
+        }
     }
 
     // Найдем название товара на нужном языке
@@ -95,92 +98,183 @@ function save_product($product)
     }
 }
 
+//********************************************************************************************** */
 function save_product2($product)
 {
-    
+    //print_r($product);
+    if ($product['sku']==null && $product['product_id']==null) {
+        return NULL;
+    }
+
     // Найдем товар
-    $S = SQLQ("SELECT * FROM `product` WHERE `sku` LIKE '{$product['sku']}' ");
-    if(!mysqli_num_rows($S)){
-        SQLQ("INSERT INTO `product` (`sku`, `weight`, `product_id`, `img`) VALUES ('{$product['sku']}', '{$product['weight']}', '{$product['product_id']}', '{$product['img']}');");
+    if($product['sku']==NULL){
+        $query = "SELECT * FROM `product` WHERE `iherb_id` = '{$product['product_id']}';";
+    }elseif($product['product_id']==NULL){
+        $query = "SELECT * FROM `product` WHERE `sku` = '{$product['sku']}';";
     }else{
-        // Проверим записан ли у нас вес товара
-        if($product['weight']>0){
-            while ($Q = mysqli_fetch_array($S)) {
+        $query = "SELECT * FROM `product` WHERE `sku` LIKE '{$product['sku']}' OR `iherb_id` = '{$product['product_id']}';";
+    }
+
+    //echo $query;
+    $S = SQLQ($query);
+    if(!mysqli_num_rows($S)){
+        SQLQ("INSERT INTO `product` (`sku`, `weight`, `iherb_id`, `img`, `url`) VALUES ('{$product['sku']}', '{$product['weight']}', '{$product['product_id']}', '{$product['img']}', '{$product['url']}');");
+    }else{
+        while ($Q = mysqli_fetch_array($S)) {
+            // Проверим записан ли у нас вес товара
+            if($product['weight']>0){
                 if($Q['weight'] == 0){
-                    SQLQ("UPDATE `product` SET `weight` = '{$product['weight']}' WHERE `product`.`sku` = '{$Q['sku']}';");
+                    SQLQ("UPDATE `product` SET `weight` = '{$product['weight']}' WHERE `product`.`id` = '{$Q['id']}';");
                 }
             }
-        }
-    }
 
-    // Найдем название товара на нужном языке
-    $S = SQLQ("SELECT * FROM `product_name` WHERE `sku` LIKE '{$product['sku']}' AND `lang` LIKE '{$product['language']}'");
-    if(!mysqli_num_rows($S)){
-        SQLQ("INSERT INTO `product_name` (`sku`, `lang`, `name`, `brand`) VALUES ('{$product['sku']}', '{$product['language']}', '{$product['name']}', '{$product['brand']}');");
-    }
-
-    // Найдем название категорий
-    if (isset($product['rank'])) {
-        foreach ($product['rank'] as $key => $value) {
-            $S = SQLQ("SELECT * FROM `product_rank` WHERE `sku` LIKE '{$product['sku']}' AND `lang` LIKE '{$product['language']}' AND `name` LIKE '{$value}'");
-            if (!mysqli_num_rows($S)) {
-                SQLQ("INSERT INTO `product_rank` (`sku`, `lang`, `name`) VALUES ('{$product['sku']}', '{$product['language']}', '{$value}');");
+            if($product['sku']!= NULL){
+                if($Q['sku'] == NULL){
+                    SQLQ("UPDATE `product` SET `sku` = '{$product['sku']}' WHERE `product`.`id` = '{$Q['id']}';");
+                }
             }
+
+            if($product['product_id']!= NULL){
+                if($Q['iherb_id'] == NULL){
+                    SQLQ("UPDATE `product` SET `iherb_id` = '{$product['product_id']}' WHERE `product`.`id` = '{$Q['id']}';");
+                }
+            }
+            
+            if($product['url']!= NULL){
+                if($Q['url'] == NULL){
+                    SQLQ("UPDATE `product` SET `url` = '{$product['url']}' WHERE `product`.`id` = '{$Q['id']}';");
+                }
+            }
+
         }
     }
 
-    // Проверим цены
+    $prod = search_product($product);
+    //print_r($prod);
+    // Найдем название товара на нужном языке
+    $S = SQLQ("SELECT * FROM `product_name` WHERE `product_id` = {$prod['id']} AND `lang` LIKE '{$product['language']}'");
+    if(!mysqli_num_rows($S)){
+        SQLQ("INSERT INTO `product_name` (`product_id`, `lang`, `name`, `brand`) VALUES ({$prod['id']}, '{$product['language']}', '{$product['name']}', '{$product['brand']}');");
+    }
+
+    // Проверим цены на наличие символа
     $product['standard_price']  = trim(str_replace($product['symbol'],'',$product['price']['standard_price']));
     $product['price']           = trim(str_replace($product['symbol'],'',$product['price']['price']));
 
-    if($product['standard_price']>0){
-        $S = SQLQ("SELECT * FROM `price` WHERE `sku` LIKE '{$product['sku']}' ORDER BY `price`.`date_create` DESC LIMIT 0,1;");
+    $product['standard_price']  = trim(str_replace(',','',$product['standard_price']));
+    $product['price']           = trim(str_replace(',','',$product['price']));
+
+    //print_r($product);
+    if($product['price']>0){
+        $S = SQLQ("SELECT * FROM `price` WHERE `product_id` = {$prod['id']} AND `currency` LIKE '{$product['currency']}' AND `country` LIKE '{$product['country']}' ORDER BY `price`.`date_create` DESC LIMIT 0,1;");
         if(mysqli_num_rows($S)>0){
             while($Q = mysqli_fetch_array($S)){
+                //print_r($product);
+                // Если цена продажи пустая , то заменим её на стандартную цену.
+                if($product['price']==0){
+                    $product['price'] = $product['standard_price'];
+                }
+
+                // Если в последней записи стандартная цена пустая, 
+                // то заменим все записи с пустой стандартной ценой 
+                // на текущую стандартную цену , если она не пустая
+                if ($Q['standard_price'] == 0) {
+                    if ($product['standard_price'] > 0) {
+                        $Q['standard_price'] = $product['standard_price'];
+                        SQLQ("UPDATE `price` SET `standard_price` = '{$product['standard_price']}' WHERE `price`.`product_id` = {$Q['product_id']} AND `price`.`currency` = '{$Q['currency']}';");
+                    }
+                }else{
+                    // Если текущая стандартная цена пустая, а старая цена имеет значение больше 0,
+                    // То используем из старой цены в новую
+                    if ($product['standard_price'] == 0) {
+                        $product['standard_price'] = $Q['standard_price'];
+                    }
+                }
+
+                //print_r($product);
+                // Если стандартная цена или цена продажи не совпадает с прошлой записью,
+                // то запишем новую историю цены.
                 if($Q['standard_price']!=$product['standard_price'] || $Q['price']!=$product['price']){
-                    SQLQ("INSERT INTO `price` (`sku`, `date_create`, `currency`, `standard_price`, `price`) VALUES ('{$product['sku']}', now(), '{$product['currency']}', '{$product['standard_price']}', '{$product['price']}') ON DUPLICATE KEY UPDATE `standard_price` = '{$product['standard_price']}', `price` = '{$product['price']}'; ");
+                    SQLQ("INSERT INTO `price` (`product_id`, `date_create`, `currency`, `country`, `standard_price`, `price`) VALUES ({$prod['id']}, now(), '{$product['currency']}', '{$product['country']}', '{$product['standard_price']}', '{$product['price']}') ON DUPLICATE KEY UPDATE `standard_price` = '{$product['standard_price']}', `price` = '{$product['price']}'; ");
                 }
             }
         }else{
-            SQLQ("INSERT INTO `price` (`sku`, `date_create`, `currency`, `standard_price`, `price`) VALUES ('{$product['sku']}', now(), '{$product['currency']}', '{$product['standard_price']}', '{$product['price']}');");
+            SQLQ("INSERT INTO `price` (`product_id`, `date_create`, `currency`, `country`, `standard_price`, `price`) VALUES ({$prod['id']}, now(), '{$product['currency']}', '{$product['country']}', '{$product['standard_price']}', '{$product['price']}');");
         }
     }
+
+    // Запись рейтинга на текущую дату.
+    Rating::save($prod['id'], $product);
+    
 }
 
-//****************************************************************************************************************************************
-function load()
-{
-    $product = [];
-    $S = SQLQ("SELECT * FROM `load` ORDER BY `id` DESC LIMIT 0,1;");
+//********************************************************************* */
+function category_find_or_create($category){
+
+    $S = SQLQ("SELECT * FROM `catalog` WHERE `name` LIKE '{$category[1]}' AND `lang` LIKE '{$category[2]}';");
     if(mysqli_num_rows($S)>0){
         while($Q = mysqli_fetch_array($S)){
-            SQLQ("UPDATE `load` SET `processed` = '1' WHERE `load`.`id` = {$Q['id']};");
-            $product['sku']         = sku($Q['specifications']);
-            $product['weight']      = weight($Q['specifications']); 
-            $product['name']        = trim($Q['name']);
-            $product['language']    = trim($Q['language']);
-            $product['img']         = trim($Q['image']);
-
-            $meta                   = explode(';',$Q['meta']);
-            foreach ($meta as $key => $value) {
-                $arr = explode('=',$value);
-                if(is_array($arr)){
-                    if(count($arr)>1){
-                        $product['meta'][$arr[0]] = $arr[1];    
-                    }
-                }
-            }
-
-            $product['rank'] = rank($Q['rank']);
-
-            save_product($product);
-
+            return $Q;
         }
+    }else{
+        SQLQ("INSERT INTO `catalog` (`name`, `lang`, `parent`, `url`) VALUES ('{$category[1]}', '{$category[2]}', '{$category[3]}', '{$category[0]}');");
+        return category_find_or_create($category);
+    }   
+}
+
+//********************************************************************* */
+function product_category_create($product, $category){
+
+    $S = SQLQ("SELECT *
+    FROM `product_catalog` 
+    WHERE `product_id` = '{$product['id']}' AND `catalog_id` = '{$category['id']}'
+    ");
+    if(mysqli_num_rows($S)>0){
+
+    }else{
+        SQLQ("INSERT INTO `product_catalog` (`product_id`, `catalog_id`) VALUES ('{$product['id']}', '{$category['id']}');");
     }
 }
 
 //********************************************************************* */
-function search_product_id($id, $lang)
+function save_catalog($product){
+    if($product === NULL){return NULL;}
+    $category_id = 0;
+    foreach ($product['category'] as $key => $value) {
+        
+        $value[2] = $product['language'];
+        $value[3] = $category_id;
+        $category = category_find_or_create($value);
+        product_category_create($product, $category);
+        $category_id = $category['id'];
+    }
+}
+
+//********************************************************************* */
+function search_iherb_id($id, $lang)
+{
+    
+    $S = SQLQ("SELECT 
+        prod.id AS id, 
+        prod.sku AS sku, 
+        prod.weight AS weight,
+        prod.url AS url,
+        nam.name AS name,
+        nam.brand AS brand
+    FROM `product` prod 
+    INNER JOIN `product_name` nam ON nam.product_id = prod.id 
+    WHERE prod.iherb_id = {$id} AND nam.lang = '{$lang}'
+    ");
+    if(mysqli_num_rows($S)>0){
+        while($Q = mysqli_fetch_array($S)){
+            return ['id'=>$Q['id'], 'sku'=>$Q['sku'], 'weight'=>$Q['weight'], 'url'=>$Q['url'], 'name'=>$Q['name'], 'brand'=>$Q['brand']];
+        }
+    }
+    return NULL;
+}
+
+//********************************************************************* */
+function search_sku($sku, $lang)
 {
     $S = SQLQ("SELECT 
         prod.sku AS sku, 
@@ -189,34 +283,44 @@ function search_product_id($id, $lang)
         nam.brand AS brand
     FROM `product` prod 
     INNER JOIN `product_name` nam ON nam.sku = prod.sku 
-    WHERE prod.product_id = {$id} AND nam.lang = '{$lang}'
+    WHERE prod.sku = {$sku} AND nam.lang = '{$lang}'
     ");
     if(mysqli_num_rows($S)>0){
         while($Q = mysqli_fetch_array($S)){
-            return ['sku'=>$Q['sku'], 'weight'=>$Q['weight'], 'name'=>$Q['name'], 'brand'=>$Q['brand']];
+            return ['id'=>$Q['id'], 'sku'=>$Q['sku'], 'weight'=>$Q['weight'], 'name'=>$Q['name'], 'brand'=>$Q['brand']];
         }
     }
 }
 
 //********************************************************************* */
-function search_price($sku, $currency)
+function search_product($product)
 {
-    $price = [];
-    $S = SQLQ("SELECT * FROM `price` WHERE `sku` LIKE '{$sku}' AND `currency` LIKE '{$currency}' ORDER BY `date_create` DESC;");
+    //language
+    // Найдем товар
+    if($product['sku']==NULL){
+        $query = "SELECT * FROM `product` WHERE `iherb_id` = '{$product['product_id']}';";
+    }elseif($product['product_id']==NULL){
+        $query = "SELECT * FROM `product` WHERE `sku` = '{$product['sku']}';";
+    }else{
+        $query = "SELECT * FROM `product` WHERE `sku` LIKE '{$product['sku']}' OR `iherb_id` = '{$product['product_id']}';";
+    }
+
+    $S = SQLQ($query);
     if(mysqli_num_rows($S)>0){
         while($Q = mysqli_fetch_array($S)){
-            $price[] = ['date_create'=>$Q['date_create'], 'price'=>$Q['price'], 'standard_price'=>$Q['standard_price']];
+            return ['id'=>$Q['id'], 'sku'=>$Q['sku'], 'iherb_id'=>$Q['iherb_id'], 'weight'=>$Q['weight'], 'url'=>$Q['url']];
         }
     }
-    return $price;
+
+    return NULL;
 }
 
 //********************************************************************* */
 function search_HTML_atrib($atrib, $html)
 {
-    /*if(strpos($html, $atrib) === false){
+    if(strpos($html, $atrib) === false){
         return '';
-    }*/
+    }
 
     $html = trim($html);
     $html = substr($html, strpos($html, $atrib)+strlen($atrib));
@@ -231,17 +335,21 @@ function sku_HTML($html)
         return search_HTML_atrib('data-part-number=`', $html);
     }
 
-   
     if(strpos($html, 'data-ga-part-number=`') !== false){
         return search_HTML_atrib('data-ga-part-number=`', $html);
     }
 
-    //data-ga-event-label=`
+    return NULL;
+    /*
+    if(strpos($html, 'title=`') !== false){
+        return search_HTML_atrib('title=`', $html);
+    }
+    
     if(strpos($html, 'data-ga-event-label=`') !== false){
         return search_HTML_atrib('data-ga-event-label=`', $html);
     }
+    */
     
-    return '';
 }
 
 //********************************************************************* */
@@ -260,9 +368,15 @@ function product_id_HTML($html)
         return search_HTML_atrib('data-ds-id=`', $html);
     }
 
+    if(strpos($html, 'data-prodhref=`prodHref` href=`') !== false){
+        $url = search_HTML_atrib('data-prodhref=`prodHref` href=`', $html);
+        $url = explode('/',$url);
+        return $url[count($url)-1];
+    }
+
     echo $html;
 
-    return '';
+    return NULL;
 }
 
 //********************************************************************* */
@@ -306,12 +420,10 @@ function name_HTML($html)
         return search_HTML_atrib('title=`', $html);
     }
 
-    //data-ga-title=`
     if(strpos($html, 'data-ga-title=`') !== false){
         return search_HTML_atrib('data-ga-title=`', $html);
     }
 
-    //data-ga-title=`
     return '';
 }
 
@@ -322,13 +434,15 @@ function price_HTML($html)
 
     $html = trim($html);
 
-    //$html = substr($html, strpos($html, $atrib)+strlen($atrib));
-    //return substr($html, 0, strpos($html, '`'));
     if(strpos($html, '<span class=`price` itemprop=`price` content=`') !== false){
+
         $price['standard_price']    = search_HTML_atrib('<span class=`price` itemprop=`price` content=`', $html);
         $price['price']             = $price['standard_price'];
+
     }elseif(strpos($html, '<span class=`price discount-red` itemprop=`price` content=`') !== false){
+
         $price['price']             = search_HTML_atrib('<span class=`price discount-red` itemprop=`price` content=`', $html);
+
         if(strpos($html, '<span class=`price-olp` itemprop=`price` content=`') !== false){
             $price['standard_price'] = search_HTML_atrib('<span class=`price-olp` itemprop=`price` content=`', $html);      
         }elseif(strpos($html, '<span class=`price-olp`>') !== false){
@@ -340,16 +454,16 @@ function price_HTML($html)
             $text = trim(substr($text, strpos($text, $atrib)+strlen($atrib)));
             $price['standard_price'] = substr($text, 0, strpos($text, '<'));
         }
+
     }elseif(strpos($html, '<span class=`price discount-red`>') !== false){
+
         $atrib = '<span class=`price discount-red`>';
         $text = trim($html);
         $text = trim(str_replace(' ','',str_replace('\n','',trim(substr($text, strpos($text, $atrib)+strlen($atrib))))));
-        //echo $text;
         
         $atrib = '<bdi>';
         $text = trim(substr($text, strpos($text, $atrib)+strlen($atrib)));
         $price['price'] = substr($text, 0, strpos($text, '<'));
-        //echo $price['price'];
         
         $atrib = '<span class=`price-olp`>';
         $text = trim($html);
@@ -357,31 +471,59 @@ function price_HTML($html)
         $atrib = '<bdi>';
         $text = trim(substr($text, strpos($text, $atrib)+strlen($atrib)));
         $price['standard_price'] = substr($text, 0, strpos($text, '<'));
-    }elseif(strpos($html, '<div class=`price-original-list`>') !== false){
-        $atrib = '<div class=`price-original-list`>';
-        $text = trim($html);
-        $text = trim(str_replace(' ','',str_replace('\n','',trim(substr($text, strpos($text, $atrib)+strlen($atrib))))));
-        $price['standard_price'] = substr($text, 0, strpos($text, '<'));
 
+    }elseif(strpos($html, '<div class=`price-original-list`>') !== false){
+
+        $text = cut_html_code('<div class=`price-original-list`>', $html, true);
+        $price['standard_price'] = substr($text, 0, strpos($text, '<'));
         $price['price'] = search_HTML_atrib('<meta itemprop=`price` content=`', $html);
+
+    }elseif(strpos($html, '<span class=`price`>') !== false){
+
+        $text = cut_html_code('<span class=`price`>', $html, true);
+        $text = cut_html_code('<bdi>', $text, true);
+        $price['standard_price'] = substr($text, 0, strpos($text, '<'));
+        $price['price']          = $price['standard_price'];
+
+    }elseif(strpos($html, '<span class=`price discount-green`>') !== false){
+
+        $text = cut_html_code('<span class=`price discount-green`>', $html, true);
+        $text = cut_html_code('<bdi>', $text, true);
+        $price['price'] = substr($text, 0, strpos($text, '<'));
+
+    }elseif(strpos($html, '<meta itemprop=`price` content=`') !== false){
+
+        $price['standard_price'] = $price['price'] = search_HTML_atrib('<meta itemprop=`price` content=`', $html);
+
     }
+
+    //
 
     return $price;
 }
 
 //********************************************************************* */
-function brand_HTML($html, $name){
-    //data-ga-brand-name=`
-    if(strpos($html, 'data-ga-brand-name=`') !== false){
-        return search_HTML_atrib('data-ga-brand-name=`', $html);
-    }
+function cut_html_code($code, $html, $trim = false){
 
-    if($name != ''){
-        return trim(substr($name, 0, strpos($name, ',')));
+    $html = trim($html);
+    $html = str_replace('\n','',trim(substr($html, strpos($html, $code)+strlen($code))));
+    if ($trim) {
+        return trim(str_replace(' ', '', $html));
     }
-
-    return '';
+    return $html;
 }
+
+//********************************************************************* */
+function url_HTML($html){
+    if(strpos($html, 'data-prodhref=`prodHref` href=`') !== false){
+        $url = search_HTML_atrib('data-prodhref=`prodHref` href=`', $html);
+        $url = explode('?',$url);
+        return $url[0];
+    }
+
+    return NULL;
+}
+
 
 //********************************************************************* */
 function clear_symbol($data, $symbol){
@@ -398,24 +540,40 @@ function clear_symbol($data, $symbol){
 }
 
 //********************************************************************* */
+function search_category_HTML($catalog, $product)
+{
+    $category = explode('</a>', $catalog);
+    foreach ($category as $key => $value) {
+        $category[$key] = trim(str_replace('\n','',trim($value)));
+        if (strpos($category[$key], '<a href=`') === false) {
+            unset($category[$key]);
+        }else{
+            $category[$key] = explode('>',$category[$key]);
+            $category[$key][0] = search_HTML_atrib('href=`', $category[$key][0]);
+            if (strpos($category[$key][0], 'https://www.iherb.com') === false) {
+                $category[$key][0] = 'https://www.iherb.com'.$category[$key][0];
+            }
+        }
+    }
+    //print_r($category);
+    return $category;
+}
+//********************************************************************* */
 function load_HTML($html, $type)
 {
     $html = trim($html);
 
     $product = [];
     $product['sku']         = sku_HTML($html);
-    //echo $product['sku'];
-    if($product['sku']!=''){
-        $product['product_id']  = product_id_HTML($html);
-        $product['img']         = img_HTML($html);
-        $product['name']        = name_HTML($html);
-        $product['price']       = price_HTML($html);
-        $product['brand']       = brand_HTML($html, $product['name']);
-        $product['weight']      = 0;
+    $product['product_id']  = product_id_HTML($html);
+    $product['img']         = img_HTML($html);
+    $product['name']        = name_HTML($html);
+    $product['price']       = price_HTML($html);
+    $product['brand']       = HTML::brand_search($html, $product['name']);
+    $product['weight']      = weight($html);
+    $product['url']         = url_HTML($html);
+    $product['rating']      = HTML::rating_search($html);
 
-    }else{
-        $product['html'] = $html;
-    }
     return $product;
 }
 
@@ -432,9 +590,11 @@ function load_HTML2($html, $type)
         $product['img']         = img_HTML($html);
         $product['name']        = name_HTML($html);
         $product['price']       = price_HTML($html);
-        $product['brand']       = brand_HTML($html, $product['name']);
+        $product['brand']       = HTML::brand_search($html, $product['name']);
         $product['weight']      = weight($html);
         $product['rank']        = rank($html);
+        $product['rating']      = HTML::rating_search($html);
+        $product['url']         = NULL;
     }else{
         $product['html'] = $html;
     }

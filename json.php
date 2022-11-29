@@ -2,7 +2,7 @@
 header("Access-Control-Allow-Origin: *");
 header("Content-Type: application/json; charset=UTF-8");
 
-include_once 'connect.php';
+include_once 'class.php';
 include_once 'load.php';
 
 $json = [];
@@ -12,32 +12,24 @@ if (isset($_GET['type'])){
     $data['type'] = (int)($_GET['type']);
 }
 
-if($data['type']==1){
-    $data['name']           = anticrack($_POST['name']);
-    $data['specifications'] = anticrack($_POST['specifications']);
-    $data['rank']           = anticrack($_POST['rank']);
-    $data['image']          = anticrack($_POST['image']);
-    $data['pricing']        = anticrack($_POST['pricing']);
-    $data['content']        = anticrack($_POST['content']);
-    $data['meta']           = anticrack($_POST['meta']);
-    $data['language']       = anticrack($_POST['language']);
-    
-    if($data['name']!=''){
-        saveValue($data);
-    }
-
-    load();
-}elseif($data['type']==2){
+if($data['type']==2){
     $data['html'] = anticrack($_POST['html']);
     if($data['html']!=''){
-        save_HTML($data);
+        //save_HTML($data);
         $json = Job_html($data);
     }
 }elseif($data['type']==3){
     $data['html'] = anticrack($_POST['html']);
     if($data['html']!=''){
-        save_HTML($data);
+        //save_HTML($data);
         $json = Job_html2($data);
+    }
+}elseif($data['type']==4){
+    $data['html']       = anticrack($_POST['html']);
+    $data['catalog']    = anticrack($_POST['catalog']);
+    if($data['html']!=''){
+        //save_HTML($data);
+        $json = Job_html3($data);
     }
 }
 
@@ -59,59 +51,87 @@ function save_HTML($value){
 
 function Job_html($value){
 
-    $product = load_HTML($value['html'], $value['type']);
+    $product = [];
+    $product_load = load_HTML($value['html'], $value['type']);
 
-    // Проверка на заполнение
-    if(!isset($product['sku'])){ return $product;}
-    if($product['sku']==''){ return $product;}
-    //print_r($product);
+    $product_load['language']    = $_POST['language'];
+    $product_load['currency']    = $_POST['currency'];
+    $product_load['country']     = $_POST['country'];
+    $product_load['symbol']      = search_symbol($_POST['currency']);    
+    save_product2($product_load);
+
+    $product                    = search_iherb_id($product_load['product_id'], $_POST['language']);
+    
+    $product['product_load']    = $product_load;
+
+    $product['price']       = Price::product_id($product['id'], $_POST['currency'], $_POST['country']);
     $product['language']    = $_POST['language'];
     $product['currency']    = $_POST['currency'];
-    $product['symbol']      = search_symbol($product['currency']);
-    save_product2($product);
+    $product['symbol']      = search_symbol($_POST['currency']);
+    $product['rating']      = Rating::view_changes($product['id']);
+    return $product;
 
-    $product['product']     = search_product_id($product['product_id'], $product['language']);
-    //$product['price']       = search_price($product['product']['sku'], $product['currency']);
+}
+
+
+function Job_html3($value){
+
+    $product = [];
+    $product_load = load_HTML($value['html'], $value['type']);
+
+    $product_load['language']   = $_POST['language'];
+    $product_load['currency']   = $_POST['currency'];
+    $product_load['country']    = $_POST['country'];
+    $product_load['symbol']     = search_symbol($_POST['currency']);  
+    $product_load['category']   = search_category_HTML($value['catalog'], $product_load);
+    save_product2($product_load);
+
+    $product                    = search_iherb_id($product_load['product_id'], $_POST['language']);
+    
+    $product['product_load']    = $product_load;
+    $product_load['id']         = $product['id'];
+    save_catalog($product_load);
+
+    $product['price']       = Price::product_id($product['id'], $_POST['currency'], $_POST['country']);
+    $product['language']    = $_POST['language'];
+    $product['currency']    = $_POST['currency'];
+    $product['symbol']      = search_symbol($_POST['currency']);
+    $product['rating']      = Rating::view_changes($product['id']);
     return $product;
 
 }
 
 function Job_html2($value){
 
-    $product = load_HTML2($value['html'], $value['type']);
+    $product = [];
+    $product_load = load_HTML2($value['html'], $value['type']);
 
     // Проверка на заполнение
-    if(!isset($product['sku'])){ return $product;}
-    if($product['sku']==''){ return $product;}
+    if(!isset($product_load['sku'])){ return $product_load;}
+    if($product_load['sku']==''){ return $product_load;}
 
+    $product_load['language']    = $_POST['language'];
+    $product_load['currency']    = $_POST['currency'];
+    $product_load['country']     = $_POST['country'];
+    $product_load['symbol']      = search_symbol($_POST['currency']);
+    $product_load['price']       = clear_symbol($product_load['price'],$product_load['symbol']);
+    save_product2($product_load);
+
+    $product                = search_iherb_id($product_load['product_id'], $_POST['language']);
+    $product['product_load']= $product_load;
+    $product['price']       = Price::product_id($product['id'], $_POST['currency'], $_POST['country']);
     $product['language']    = $_POST['language'];
     $product['currency']    = $_POST['currency'];
     $product['symbol']      = search_symbol($_POST['currency']);
-    $product['price']       = clear_symbol($product['price'],$product['symbol']);
-    save_product2($product);
-
-    $product                = search_product_id($product['product_id'], $_POST['language']);
-    $product['price']       = search_price($product['sku'], $_POST['currency']);
+    $product['rating']      = Rating::view_changes($product['id']);
     
     return $product;
 
 }
 
 
-if($data['type']==1){
-    if (isset($_POST['product_id'])){
-        $json['product_id'] = $_POST['product_id'];
-        $json['currency']   = $_POST['currency'];
-        $json['symbol']     = '$';
-        $json['language']   = $_POST['language'];
-        $json['product']    = search_product_id($json['product_id'], $json['language']);
-        $json['price']      = search_price($json['product']['sku'], $json['currency']);
-    }
-}elseif($data['type']==2){
-    //$data['html']           = anticrack($_POST['html']);
-}elseif($data['type']==3){
-    //$data['html']           = anticrack($_POST['html']);
-}else{
+
+if($data['type']==0){
     $json['POST'] = $_POST;
     $json['GET'] = $_GET;
 }
