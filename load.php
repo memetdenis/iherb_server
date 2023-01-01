@@ -14,16 +14,9 @@ function sku($contents)
 }
 
 
-//**************************************************************************************************************************************** */
-// Найдем вес
-function weight($contents)
+// Конвертируем в КГ
+function weight_convert($contents)
 {
-
-    $atrib = 'product-weight`>';
-    $contents = trim($contents);
-    $contents = trim(str_replace('\n','',trim(substr($contents, strpos($contents, $atrib)+strlen($atrib)))));
-    $contents = trim(substr($contents, 0, strpos($contents, '</span>')));
-
     $ar = explode(' ',$contents);
     switch(trim($ar[1])){
         case 'кг':
@@ -35,6 +28,18 @@ function weight($contents)
     }
 
     return 0;
+}
+//**************************************************************************************************************************************** */
+// Найдем вес
+function weight($contents)
+{
+
+    $atrib = 'product-weight`>';
+    $contents = trim($contents);
+    $contents = trim(str_replace('\n','',trim(substr($contents, strpos($contents, $atrib)+strlen($atrib)))));
+    $contents = trim(substr($contents, 0, strpos($contents, '</span>')));
+
+    return weight_convert($contents);
 
 }
 
@@ -118,7 +123,135 @@ function save_product2($product)
     //echo $query;
     $S = SQLQ($query);
     if(!mysqli_num_rows($S)){
-        SQLQ("INSERT INTO `product` (`sku`, `weight`, `iherb_id`, `img`, `url`) VALUES ('{$product['sku']}', '{$product['weight']}', '{$product['product_id']}', '{$product['img']}', '{$product['url']}');");
+        SQLQ("INSERT INTO `product` (`sku`, `weight`, `iherb_id`, `url`) VALUES ('{$product['sku']}', '{$product['weight']}', '{$product['product_id']}', '{$product['url']}');");
+    }else{
+        while ($Q = mysqli_fetch_array($S)) {
+            // Проверим записан ли у нас вес товара
+            if($product['weight']>0){
+                if($Q['weight'] == 0){
+                    SQLQ("UPDATE `product` SET `weight` = '{$product['weight']}' WHERE `product`.`id` = '{$Q['id']}';");
+                }
+            }
+
+            if($product['sku']!= NULL){
+                if($Q['sku'] == NULL){
+                    SQLQ("UPDATE `product` SET `sku` = '{$product['sku']}' WHERE `product`.`id` = '{$Q['id']}';");
+                }
+            }
+
+            if($product['product_id']!= NULL){
+                if($Q['iherb_id'] == NULL){
+                    SQLQ("UPDATE `product` SET `iherb_id` = '{$product['product_id']}' WHERE `product`.`id` = '{$Q['id']}';");
+                }
+            }
+            
+            if($product['url']!= NULL){
+                if($Q['url'] == NULL){
+                    SQLQ("UPDATE `product` SET `url` = '{$product['url']}' WHERE `product`.`id` = '{$Q['id']}';");
+                }
+            }
+            
+            if (isset($product['stock_status'])) {
+                if ($Q['qty'] != $product['stock_status']) {
+                    SQLQ("UPDATE `product` SET `qty` = '{$product['stock_status']}' WHERE `product`.`id` = '{$Q['id']}';");
+                }
+            }
+
+        }
+    }
+
+    $prod = search_product($product);
+
+    // Найдем название товара на нужном языке
+    if ($product['language']!='') {
+        $S = SQLQ("SELECT * FROM `product_name` WHERE `product_id` = {$prod['id']} AND `lang` LIKE '{$product['language']}'");
+        if (!mysqli_num_rows($S)) {
+            SQLQ("INSERT INTO `product_name` (`product_id`, `lang`, `name`, `brand`) VALUES ({$prod['id']}, '{$product['language']}', '{$product['name']}', '{$product['brand']}');");
+        }
+    }
+
+    // Проверим цены на наличие символа
+    $product['standard_price']  = trim(str_replace($product['symbol'],'',$product['price']['standard_price']));
+    $product['price']           = trim(str_replace($product['symbol'],'',$product['price']['price']));
+
+    $product['standard_price']  = trim(str_replace(',','',$product['standard_price']));
+    $product['price']           = trim(str_replace(',','',$product['price']));
+
+    //print_r($product);
+    if($product['price']>0){
+        $S = SQLQ("SELECT * FROM `price` WHERE `product_id` = {$prod['id']} AND `currency` LIKE '{$product['currency']}' AND `country` LIKE '{$product['country']}' ORDER BY `price`.`date_create` DESC LIMIT 0,1;");
+        if(mysqli_num_rows($S)>0){
+            while($Q = mysqli_fetch_array($S)){
+                // print_r($product);
+                // Если цена продажи пустая , то заменим её на стандартную цену.
+                if($product['price']==0){
+                    $product['price'] = $product['standard_price'];
+                }
+
+                // Если в последней записи стандартная цена пустая, 
+                // то заменим все записи с пустой стандартной ценой 
+                // на текущую стандартную цену , если она не пустая
+                if ($Q['standard_price'] == 0) {
+                    if ($product['standard_price'] > 0) {
+                        $Q['standard_price'] = $product['standard_price'];
+                        SQLQ("UPDATE `price` SET `standard_price` = '{$product['standard_price']}', `last_modified` = unix_timestamp() WHERE `price`.`product_id` = {$Q['product_id']} AND `price`.`currency` = '{$Q['currency']}';");
+                    }
+                }else{
+                    // Если текущая стандартная цена пустая, а старая цена имеет значение больше 0,
+                    // То используем из старой цены в новую
+                    if ($product['standard_price'] == 0) {
+                        $product['standard_price'] = $Q['standard_price'];
+                    }
+                }
+
+                //print_r($product);
+                // Если стандартная цена или цена продажи не совпадает с прошлой записью,
+                // то запишем новую историю цены.
+                if($Q['standard_price']!=$product['standard_price'] || $Q['price']!=$product['price']){
+                    SQLQ("INSERT INTO `price` (`product_id`, `date_create`, `currency`, `country`, `standard_price`, `price`) VALUES ({$prod['id']}, now(), '{$product['currency']}', '{$product['country']}', '{$product['standard_price']}', '{$product['price']}') ON DUPLICATE KEY UPDATE `standard_price` = '{$product['standard_price']}', `price` = '{$product['price']}', `last_modified` = unix_timestamp() ; ");
+                }else{
+                    SQLQ("UPDATE `price` SET `last_modified` = unix_timestamp() WHERE `price`.`product_id` = {$Q['product_id']} AND `price`.`date_create` = '{$Q['date_create']}' AND `price`.`currency` LIKE '{$Q['currency']}' AND `price`.`country` LIKE '{$Q['country']}';");
+                }
+            }
+        }else{
+            SQLQ("INSERT INTO `price` (`product_id`, `date_create`, `currency`, `country`, `standard_price`, `price`) VALUES ({$prod['id']}, now(), '{$product['currency']}', '{$product['country']}', '{$product['standard_price']}', '{$product['price']}');");
+        }
+    }
+
+    // Запись рейтинга на текущую дату.
+    Rating::save($prod['id'], $product);
+
+    // Запись листа спецификации.
+    save_specs_list($prod['iherb_id'], $product);
+
+    // Сохраним картинки.
+    Img::save_base($product['img_new']);
+    foreach ($product['img_list'] as $key => $value) {
+        Img::save_base(img_structure($value, $prod['iherb_id']));
+    }
+    
+}
+
+//********************************************************************************************** */
+function save_product3($product)
+{
+    if ($product['sku']==null && $product['product_id']==null) {
+        return NULL;
+    }
+
+    // Найдем товар
+    if($product['sku']==NULL){
+        $query = "SELECT * FROM `product` WHERE `iherb_id` = '{$product['product_id']}';";
+    }elseif($product['product_id']==NULL){
+        $query = "SELECT * FROM `product` WHERE `sku` = '{$product['sku']}';";
+    }else{
+        $query = "SELECT * FROM `product` WHERE `sku` LIKE '{$product['sku']}' OR `iherb_id` = '{$product['product_id']}';";
+    }
+
+    //echo $query;
+    $S = SQLQ($query);
+    if(!mysqli_num_rows($S)){
+        SQLQ("INSERT INTO `product` (`sku`, `weight`, `iherb_id`, `url`) VALUES ('{$product['sku']}', '{$product['weight']}', '{$product['product_id']}', '{$product['url']}');");
     }else{
         while ($Q = mysqli_fetch_array($S)) {
             // Проверим записан ли у нас вес товара
@@ -150,26 +283,21 @@ function save_product2($product)
     }
 
     $prod = search_product($product);
-    //print_r($prod);
+
     // Найдем название товара на нужном языке
-    $S = SQLQ("SELECT * FROM `product_name` WHERE `product_id` = {$prod['id']} AND `lang` LIKE '{$product['language']}'");
-    if(!mysqli_num_rows($S)){
-        SQLQ("INSERT INTO `product_name` (`product_id`, `lang`, `name`, `brand`) VALUES ({$prod['id']}, '{$product['language']}', '{$product['name']}', '{$product['brand']}');");
+    if ($product['language']!='') {
+        $S = SQLQ("SELECT * FROM `product_name` WHERE `product_id` = {$prod['id']} AND `lang` LIKE '{$product['language']}'");
+        if (!mysqli_num_rows($S)) {
+            SQLQ("INSERT INTO `product_name` (`product_id`, `lang`, `name`, `brand`) VALUES ({$prod['id']}, '{$product['language']}', '{$product['name']}', '{$product['brand']}');");
+        }
     }
-
-    // Проверим цены на наличие символа
-    $product['standard_price']  = trim(str_replace($product['symbol'],'',$product['price']['standard_price']));
-    $product['price']           = trim(str_replace($product['symbol'],'',$product['price']['price']));
-
-    $product['standard_price']  = trim(str_replace(',','',$product['standard_price']));
-    $product['price']           = trim(str_replace(',','',$product['price']));
 
     //print_r($product);
     if($product['price']>0){
         $S = SQLQ("SELECT * FROM `price` WHERE `product_id` = {$prod['id']} AND `currency` LIKE '{$product['currency']}' AND `country` LIKE '{$product['country']}' ORDER BY `price`.`date_create` DESC LIMIT 0,1;");
         if(mysqli_num_rows($S)>0){
             while($Q = mysqli_fetch_array($S)){
-                //print_r($product);
+                // print_r($product);
                 // Если цена продажи пустая , то заменим её на стандартную цену.
                 if($product['price']==0){
                     $product['price'] = $product['standard_price'];
@@ -181,7 +309,7 @@ function save_product2($product)
                 if ($Q['standard_price'] == 0) {
                     if ($product['standard_price'] > 0) {
                         $Q['standard_price'] = $product['standard_price'];
-                        SQLQ("UPDATE `price` SET `standard_price` = '{$product['standard_price']}' WHERE `price`.`product_id` = {$Q['product_id']} AND `price`.`currency` = '{$Q['currency']}';");
+                        SQLQ("UPDATE `price` SET `standard_price` = '{$product['standard_price']}', `last_modified` = unix_timestamp() WHERE `price`.`product_id` = {$Q['product_id']} AND `price`.`currency` = '{$Q['currency']}';");
                     }
                 }else{
                     // Если текущая стандартная цена пустая, а старая цена имеет значение больше 0,
@@ -191,11 +319,12 @@ function save_product2($product)
                     }
                 }
 
-                //print_r($product);
                 // Если стандартная цена или цена продажи не совпадает с прошлой записью,
                 // то запишем новую историю цены.
                 if($Q['standard_price']!=$product['standard_price'] || $Q['price']!=$product['price']){
-                    SQLQ("INSERT INTO `price` (`product_id`, `date_create`, `currency`, `country`, `standard_price`, `price`) VALUES ({$prod['id']}, now(), '{$product['currency']}', '{$product['country']}', '{$product['standard_price']}', '{$product['price']}') ON DUPLICATE KEY UPDATE `standard_price` = '{$product['standard_price']}', `price` = '{$product['price']}'; ");
+                    SQLQ("INSERT INTO `price` (`product_id`, `date_create`, `currency`, `country`, `standard_price`, `price`) VALUES ({$prod['id']}, now(), '{$product['currency']}', '{$product['country']}', '{$product['standard_price']}', '{$product['price']}') ON DUPLICATE KEY UPDATE `standard_price` = '{$product['standard_price']}', `price` = '{$product['price']}', `last_modified` = unix_timestamp() ; ");
+                }else{
+                    SQLQ("UPDATE `price` SET `last_modified` = unix_timestamp() WHERE `price`.`product_id` = {$Q['product_id']} AND `price`.`date_create` = '{$Q['date_create']}' AND `price`.`currency` LIKE '{$Q['currency']}' AND `price`.`country` LIKE '{$Q['country']}';");
                 }
             }
         }else{
@@ -203,23 +332,18 @@ function save_product2($product)
         }
     }
 
-    // Запись рейтинга на текущую дату.
-    Rating::save($prod['id'], $product);
-    
+    // Сохраним картинки.
+    Img::save_base($product['img_new']);
+
 }
-
 //********************************************************************* */
-function category_find_or_create($category){
-
-    $S = SQLQ("SELECT * FROM `catalog` WHERE `name` LIKE '{$category[1]}' AND `lang` LIKE '{$category[2]}';");
-    if(mysqli_num_rows($S)>0){
-        while($Q = mysqli_fetch_array($S)){
-            return $Q;
+function save_specs_list($id, $product){
+    if($product === NULL){return NULL;}
+    if(isset($product['specs_list'])){
+        foreach ($product['specs_list'] as $key => $value) {
+            SQLQ("INSERT INTO `specs_list` (`product_id`, `lang`, `param`, `name`, `value`) VALUES ({$id}, '{$product['language']}', '{$key}', '{$value[0]}', '{$value[1]}') ON DUPLICATE KEY UPDATE `name` = '{$value[0]}', `value` = '{$value[1]}';");
         }
-    }else{
-        SQLQ("INSERT INTO `catalog` (`name`, `lang`, `parent`, `url`) VALUES ('{$category[1]}', '{$category[2]}', '{$category[3]}', '{$category[0]}');");
-        return category_find_or_create($category);
-    }   
+    }
 }
 
 //********************************************************************* */
@@ -244,7 +368,7 @@ function save_catalog($product){
         
         $value[2] = $product['language'];
         $value[3] = $category_id;
-        $category = category_find_or_create($value);
+        $category = Category::find_or_create($value);
         product_category_create($product, $category);
         $category_id = $category['id'];
     }
@@ -276,18 +400,12 @@ function search_iherb_id($id, $lang)
 //********************************************************************* */
 function search_sku($sku, $lang)
 {
-    $S = SQLQ("SELECT 
-        prod.sku AS sku, 
-        prod.weight AS weight,
-        nam.name AS name,
-        nam.brand AS brand
-    FROM `product` prod 
-    INNER JOIN `product_name` nam ON nam.sku = prod.sku 
-    WHERE prod.sku = {$sku} AND nam.lang = '{$lang}'
-    ");
+    $S = SQLQ("SELECT sku, weight, iherb_id
+    FROM `product`  
+    WHERE sku LIKE '{$sku}' ");
     if(mysqli_num_rows($S)>0){
         while($Q = mysqli_fetch_array($S)){
-            return ['id'=>$Q['id'], 'sku'=>$Q['sku'], 'weight'=>$Q['weight'], 'name'=>$Q['name'], 'brand'=>$Q['brand']];
+            return $Q;
         }
     }
 }
@@ -295,7 +413,7 @@ function search_sku($sku, $lang)
 //********************************************************************* */
 function search_product($product)
 {
-    //language
+    // language
     // Найдем товар
     if($product['sku']==NULL){
         $query = "SELECT * FROM `product` WHERE `iherb_id` = '{$product['product_id']}';";
@@ -339,6 +457,11 @@ function sku_HTML($html)
         return search_HTML_atrib('data-ga-part-number=`', $html);
     }
 
+    if(strpos($html, 'data-ga-event-label=`') !== false){
+        return search_HTML_atrib('data-ga-event-label=`', $html);
+    }
+
+    //
     return NULL;
     /*
     if(strpos($html, 'title=`') !== false){
@@ -382,6 +505,13 @@ function product_id_HTML($html)
 //********************************************************************* */
 function img_HTML($html)
 {
+    if(strpos($html, 'class=`image-container`') !== false){
+        $atrib = 'class=`image-container`';
+        $text = trim($html);
+        $text = substr($text, strpos($text, $atrib));
+        return search_HTML_atrib('href=`', $text);
+    }
+
     if(strpos($html, '<img src=`') !== false){
         return search_HTML_atrib('<img src=`', $html);
     }
@@ -503,6 +633,7 @@ function price_HTML($html)
 }
 
 //********************************************************************* */
+// Вырезать всё до этого кода
 function cut_html_code($code, $html, $trim = false){
 
     $html = trim($html);
@@ -514,12 +645,31 @@ function cut_html_code($code, $html, $trim = false){
 }
 
 //********************************************************************* */
+// Вырезать всё после этого кода
+function cut_html_to_code($code, $html, $trim = false){
+
+    $html = trim($html);
+    $html = str_replace('\n','',trim(substr($html, 0, strpos($html, $code))));
+    if ($trim) {
+        return str_replace('\n','',trim(str_replace(' ', '', $html)));
+    }
+    return $html;
+}
+
+//********************************************************************* */
 function url_HTML($html){
     if(strpos($html, 'data-prodhref=`prodHref` href=`') !== false){
         $url = search_HTML_atrib('data-prodhref=`prodHref` href=`', $html);
         $url = explode('?',$url);
         return $url[0];
     }
+
+    if(strpos($html, 'data-ds-target=`link` href=`') !== false){
+        return search_HTML_atrib('data-ds-target=`link` href=`', $html);
+    }
+
+    
+    //data-ds-target=`link` href=`
 
     return NULL;
 }
@@ -540,25 +690,6 @@ function clear_symbol($data, $symbol){
 }
 
 //********************************************************************* */
-function search_category_HTML($catalog, $product)
-{
-    $category = explode('</a>', $catalog);
-    foreach ($category as $key => $value) {
-        $category[$key] = trim(str_replace('\n','',trim($value)));
-        if (strpos($category[$key], '<a href=`') === false) {
-            unset($category[$key]);
-        }else{
-            $category[$key] = explode('>',$category[$key]);
-            $category[$key][0] = search_HTML_atrib('href=`', $category[$key][0]);
-            if (strpos($category[$key][0], 'https://www.iherb.com') === false) {
-                $category[$key][0] = 'https://www.iherb.com'.$category[$key][0];
-            }
-        }
-    }
-    //print_r($category);
-    return $category;
-}
-//********************************************************************* */
 function load_HTML($html, $type)
 {
     $html = trim($html);
@@ -573,7 +704,9 @@ function load_HTML($html, $type)
     $product['weight']      = weight($html);
     $product['url']         = url_HTML($html);
     $product['rating']      = HTML::rating_search($html);
-
+    $product['img_new']     = img_structure($product['img'], $product['product_id']);
+    $product['img_list']    = [];
+    $product['stock_status']= HTML::stock_status($html);
     return $product;
 }
 
@@ -594,12 +727,62 @@ function load_HTML2($html, $type)
         $product['weight']      = weight($html);
         $product['rank']        = rank($html);
         $product['rating']      = HTML::rating_search($html);
-        $product['url']         = NULL;
+        $product['url']         = url_HTML($html);
+        $product['img_new']     = img_structure($product['img'], $product['product_id']);
+        $product['img_list']    = img_list($html);//img_structure($product['img'], $product['product_id']);
+        $product['specs_list']  = HTML::product_specs_list($html);
+        $product['stock_status']= HTML::stock_status($html);
     }else{
         $product['html'] = $html;
     }
 
     return $product;
+}
+
+function img_list($html){
+    $list_img = [];
+    $html = trim($html);
+    $code = '<div class=`thumbnail-container`>';
+    $html = str_replace('\n','',trim(substr($html, strpos($html, $code)+strlen($code))));
+    $html = str_replace('\n','',trim(substr($html, 0, strpos($html, '<div'))));
+    $html = explode('<img', $html);
+    foreach ($html as $key => $value) {
+        $result = search_HTML_atrib('src=`',$value);
+        if ($result != '') {
+            $list_img[] = $result;
+        }
+    }
+
+    return $list_img;
+
+}
+
+
+function img_structure($img, $product_id){
+    $img_ar = explode('/', $img);
+    if (count($img_ar)==11) {
+        $img_structure = [];
+        $img_structure['name']           = $img_ar[10];
+        $img_structure['sku']            = $img_ar[8];
+        $img_structure['brand']          = $img_ar[7];
+        $img_structure['product_id']     = $product_id;
+        return $img_structure;
+    }elseif(count($img_ar)==7){
+        $img_structure = [];
+        $img_structure['name']           = $img_ar[6];
+        $img_structure['sku']            = $img_ar[4];
+        $img_structure['brand']          = $img_ar[3];
+        $img_structure['product_id']     = $product_id;
+        return $img_structure;
+    }else{
+        return false;
+    }
+
+}
+
+function save_content($html, $language, $iherb_id){
+    //echo "INSERT INTO `specs_list` (`product_id`, `lang`, `html`) VALUES ({$iherb_id}, '{$language}', '{$html}') ON DUPLICATE KEY UPDATE `html` = '{$html}';";
+    SQLQ("INSERT INTO `content` (`product_id`, `lang`, `html`) VALUES ({$iherb_id}, '{$language}', '{$html}') ON DUPLICATE KEY UPDATE `html` = '{$html}';");
 }
 
 //********************************************************************* */

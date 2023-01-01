@@ -1,4 +1,5 @@
 <?php
+
 class Rating{
 
     // Запись рейтинга
@@ -42,12 +43,15 @@ class Rating{
 
     // Текущий рейтинг
     static function current($product_id){
+
         $S = SQLQ("SELECT * FROM `rating` WHERE `product_id` = {$product_id} ORDER BY `rating`.`date_create` DESC LIMIT 0,1;");
         if (mysqli_num_rows($S)>0) {
             while ($Q = mysqli_fetch_array($S)) {
                 return $Q;
             }
         }
+
+        return ['reviewCount'=>0];
     }
 }
 
